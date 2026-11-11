@@ -1,0 +1,161 @@
+
+name: Build AymanSoft EXE and MSI
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "10.26.2"
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "AymanSoft website URL"
+        required: true
+        default: "https://aymansoft.freebuff.page/settings"
+        type: string
+
+      name:
+        description: "Application name"
+        required: true
+        default: "AYMANSOFT"
+        type: string
+
+      icon:
+        description: "Application icon URL"
+        required: false
+        type: string
+
+      width:
+        description: "Window width"
+        required: true
+        default: "1366"
+        type: string
+
+      height:
+        description: "Window height"
+        required: true
+        default: "900"
+        type: string
+
+      app_version:
+        description: "Application version"
+        required: true
+        default: "1.0.0"
+        type: string
+
+      fullscreen:
+        description: "Start in fullscreen"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aymansoft-windows-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build AymanSoft for Windows
+    runs-on: windows-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js Environment
+        uses: ./.github/actions/setup-env
+        with:
+          mode: build
+
+      - name: Build Pake CLI
+        run: pnpm run cli:build
+
+      - name: Build AymanSoft EXE and MSI
+        shell: pwsh
+        env:
+          APP_URL: ${{ inputs.url }}
+          APP_NAME: ${{ inputs.name }}
+          APP_ICON: ${{ inputs.icon }}
+          APP_WIDTH: ${{ inputs.width }}
+          APP_HEIGHT: ${{ inputs.height }}
+          APP_VERSION: ${{ inputs.app_version }}
+          APP_FULLSCREEN: ${{ inputs.fullscreen }}
+
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $buildArgs = @(
+            $env:APP_URL,
+            "--name", $env:APP_NAME,
+            "--width", $env:APP_WIDTH,
+            "--height", $env:APP_HEIGHT,
+            "--app-version", $env:APP_VERSION,
+            "--keep-binary"
+          )
+
+          if (-not [string]::IsNullOrWhiteSpace($env:APP_ICON)) {
+            $buildArgs += @("--icon", $env:APP_ICON)
+          }
+
+          if ($env:APP_FULLSCREEN -eq "true") {
+            $buildArgs += "--fullscreen"
+          }
+
+          Write-Host "Starting AymanSoft build..."
+          Write-Host "Application: $env:APP_NAME"
+
+          node dist/cli.js @buildArgs
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Pake CLI build failed."
+          }
+
+          Write-Host "Checking generated files..."
+
+          $exe = Join-Path $PWD "$($env:APP_NAME).exe"
+          $msiFiles = @(Get-ChildItem -Path $PWD -Filter "*.msi" -File)
+
+          if (-not (Test-Path $exe)) {
+            throw "EXE file was not generated: $exe"
+          }
+
+          if ($msiFiles.Count -eq 0) {
+            throw "MSI installer was not generated."
+          }
+
+          Write-Host "EXE verified successfully."
+          Write-Host "MSI verified successfully."
+
+          Get-Item $exe | Select-Object Name, Length
+          $msiFiles | Select-Object Name, Length
+
+      - name: Upload AymanSoft EXE
+        uses: actions/upload-artifact@v6
+        with:
+          name: AYMANSOFT-EXE
+          path: AYMANSOFT.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload AymanSoft MSI Installer
+        uses: actions/upload-artifact@v6
+        with:
+          name: AYMANSOFT-MSI-INSTALLER
+          path: "*.msi"
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build Summary
+        if: success()
+        shell: pwsh
+        run: |
+          "## AymanSoft Build Successful" >> $env:GITHUB_STEP_SUMMARY
+          "- EXE: AYMANSOFT.exe" >> $env:GITHUB_STEP_SUMMARY
+          "- MSI: Windows Installer" >> $env:GITHUB_STEP_SUMMARY
+          "- Status: SUCCESS" >> $env:GITHUB_STEP_SUMMARY
