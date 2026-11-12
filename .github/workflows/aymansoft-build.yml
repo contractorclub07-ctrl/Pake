@@ -1,3 +1,4 @@
+
 name: Build AymanSoft EXE and MSI
 
 env:
@@ -14,7 +15,7 @@ on:
         type: string
 
       name:
-        description: "Application name (use letters, numbers, hyphens or underscores)"
+        description: "Application name"
         required: true
         default: "AYMANSOFT"
         type: string
@@ -78,6 +79,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           pnpm run cli:build
+
           if ($LASTEXITCODE -ne 0) {
             throw "Pake CLI compilation failed."
           }
@@ -98,10 +100,21 @@ jobs:
           }
 
           if ($env:APP_NAME -notmatch '^[A-Za-z0-9_-]+$') {
-            throw "Application name can only contain letters, numbers, hyphens and underscores."
+            throw "Invalid application name."
           }
 
-          if ([int]$env:APP_WIDTH -lt 400 -or [int]$env:APP_HEIGHT -lt 300) {
+          $width = 0
+          $height = 0
+
+          if (-not [int]::TryParse($env:APP_WIDTH, [ref]$width)) {
+            throw "Invalid window width."
+          }
+
+          if (-not [int]::TryParse($env:APP_HEIGHT, [ref]$height)) {
+            throw "Invalid window height."
+          }
+
+          if ($width -lt 400 -or $height -lt 300) {
             throw "Window dimensions are too small."
           }
 
@@ -110,12 +123,12 @@ jobs:
           }
 
           if (-not (Test-Path "dist/cli.js")) {
-            throw "Pake CLI output dist/cli.js was not found."
+            throw "Pake CLI output not found."
           }
 
-          Write-Host "Build inputs validated successfully."
+          Write-Host "All build inputs are valid."
 
-      - name: Build AymanSoft EXE and MSI
+      - name: Build AymanSoft
         shell: pwsh
         env:
           APP_URL: ${{ inputs.url }}
@@ -145,31 +158,39 @@ jobs:
             $buildArgs += "--fullscreen"
           }
 
-          Write-Host "Starting AymanSoft build..."
-          Write-Host "Application: $env:APP_NAME"
-          Write-Host "Version: $env:APP_VERSION"
+          Write-Host "Building $env:APP_NAME..."
 
           node dist/cli.js @buildArgs
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Pake CLI build failed."
+            throw "Pake build failed."
           }
 
-          Write-Host "Checking generated Windows packages..."
+          Write-Host "Pake build command completed."
+
+      - name: Collect and verify build files
+        shell: pwsh
+        env:
+          APP_NAME: ${{ inputs.name }}
+        run: |
+          $ErrorActionPreference = "Stop"
 
           $exePath = Join-Path $PWD "$($env:APP_NAME).exe"
-          $msiFiles = @(Get-ChildItem -Path $PWD -Filter "*.msi" -File)
 
           if (-not (Test-Path $exePath -PathType Leaf)) {
-            throw "EXE file was not generated: $exePath"
+            throw "Raw EXE was not generated: $exePath"
           }
 
-          if ((Get-Item $exePath).Length -le 0) {
-            throw "Generated EXE file is empty."
+          $exe = Get-Item $exePath
+
+          if ($exe.Length -le 0) {
+            throw "Generated EXE is empty."
           }
+
+          $msiFiles = @(Get-ChildItem -Path $PWD -Filter "*.msi" -File)
 
           if ($msiFiles.Count -eq 0) {
-            throw "No MSI installer was generated."
+            throw "No MSI installer was generated. Check Tauri Windows bundle configuration."
           }
 
           foreach ($msi in $msiFiles) {
@@ -178,16 +199,22 @@ jobs:
             }
           }
 
-          Write-Host "EXE and MSI files verified successfully."
+          New-Item -ItemType Directory -Force -Path "release-files" | Out-Null
 
-          Get-Item $exePath | Select-Object Name, Length
-          $msiFiles | Select-Object Name, Length
+          Copy-Item $exe.FullName "release-files/$($env:APP_NAME).exe"
+
+          foreach ($msi in $msiFiles) {
+            Copy-Item $msi.FullName "release-files/$($msi.Name)"
+          }
+
+          Write-Host "Verified release files:"
+          Get-ChildItem "release-files" | Select-Object Name, Length
 
       - name: Upload AymanSoft EXE
         uses: actions/upload-artifact@v6
         with:
           name: AYMANSOFT-EXE
-          path: ${{ inputs.name }}.exe
+          path: release-files/${{ inputs.name }}.exe
           if-no-files-found: error
           retention-days: 14
 
@@ -195,7 +222,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: AYMANSOFT-MSI-INSTALLER
-          path: "*.msi"
+          path: release-files/*.msi
           if-no-files-found: error
           retention-days: 14
 
@@ -214,4 +241,3 @@ jobs:
           "- EXE: $env:APP_NAME.exe" >> $env:GITHUB_STEP_SUMMARY
           "- MSI: Windows Installer" >> $env:GITHUB_STEP_SUMMARY
           "- Status: SUCCESS" >> $env:GITHUB_STEP_SUMMARY
-          
