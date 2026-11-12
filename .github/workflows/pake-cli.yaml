@@ -1,5 +1,5 @@
 
-name: Build AymanSoft EXE
+name: Build App With Pake CLI
 
 env:
   NODE_VERSION: "22"
@@ -8,34 +8,74 @@ env:
 on:
   workflow_dispatch:
     inputs:
+      platform:
+        description: "Platform"
+        required: true
+        default: "macos-latest"
+        type: choice
+        options:
+          - "windows-latest"
+          - "macos-latest"
+          - "ubuntu-24.04"
       url:
-        description: "AymanSoft website URL"
+        description: "Website URL"
         required: true
-        default: "https://aymansoft.freebuff.page/settings"
         type: string
-
       name:
-        description: "Application name"
+        description: "App name (lowercase for Linux)"
         required: true
-        default: "AYMANSOFT"
         type: string
-
+      icon:
+        description: "Icon URL, auto-fetch if empty"
+        required: false
+        type: string
       width:
-        description: "Window width"
-        required: true
-        default: "1366"
+        description: "Window width (px)"
+        required: false
+        default: "1200"
         type: string
-
       height:
-        description: "Window height"
-        required: true
-        default: "900"
+        description: "Window height (px)"
+        required: false
+        default: "780"
         type: string
-
+      min_width:
+        description: "Minimum window width (px)"
+        required: false
+        type: string
+      min_height:
+        description: "Minimum window height (px)"
+        required: false
+        type: string
       app_version:
-        description: "Application version"
-        required: true
+        description: "App version"
+        required: false
         default: "1.0.0"
+        type: string
+      fullscreen:
+        description: "Start in fullscreen mode"
+        required: false
+        type: boolean
+        default: false
+      hide_title_bar:
+        description: "Hide title bar (macOS only)"
+        required: false
+        type: boolean
+        default: false
+      new_window:
+        description: "Allow sites to open new windows"
+        required: false
+        type: boolean
+        default: false
+      multi_arch:
+        description: "Universal binary (macOS only)"
+        required: false
+        type: boolean
+        default: false
+      targets:
+        description: "Package formats: deb,appimage,rpm,zst"
+        required: false
+        default: "deb"
         type: string
 
 permissions:
@@ -43,8 +83,10 @@ permissions:
 
 jobs:
   build:
-    name: Build AymanSoft for Windows
-    runs-on: windows-latest
+    name: ${{ inputs.platform }}
+    runs-on: ${{ inputs.platform }}
+    strategy:
+      fail-fast: false
 
     steps:
       - name: Checkout repository
@@ -60,47 +102,200 @@ jobs:
       - name: Build CLI
         run: pnpm run cli:build
 
-      - name: Build AymanSoft
+      - name: Setup mold linker
+        if: runner.os == 'Linux'
+        uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
+
+      - name: Build App (Linux/macOS)
+        if: runner.os != 'Windows'
+        timeout-minutes: 25
+        shell: bash
+        env:
+          INPUT_URL: ${{ inputs.url }}
+          INPUT_NAME: ${{ inputs.name }}
+          INPUT_ICON: ${{ inputs.icon }}
+          INPUT_WIDTH: ${{ inputs.width }}
+          INPUT_HEIGHT: ${{ inputs.height }}
+          INPUT_MIN_WIDTH: ${{ inputs.min_width }}
+          INPUT_MIN_HEIGHT: ${{ inputs.min_height }}
+          INPUT_APP_VERSION: ${{ inputs.app_version }}
+          INPUT_FULLSCREEN: ${{ inputs.fullscreen }}
+          INPUT_HIDE_TITLE_BAR: ${{ inputs.hide_title_bar }}
+          INPUT_NEW_WINDOW: ${{ inputs.new_window }}
+          INPUT_MULTI_ARCH: ${{ inputs.multi_arch }}
+          INPUT_TARGETS: ${{ inputs.targets }}
+        run: |
+          ARGS=("$INPUT_URL" "--name" "$INPUT_NAME")
+
+          if [ -n "$INPUT_ICON" ]; then
+            ARGS+=("--icon" "$INPUT_ICON")
+          fi
+
+          if [ -n "$INPUT_WIDTH" ]; then
+            ARGS+=("--width" "$INPUT_WIDTH")
+          fi
+
+          if [ -n "$INPUT_HEIGHT" ]; then
+            ARGS+=("--height" "$INPUT_HEIGHT")
+          fi
+
+          if [ -n "$INPUT_MIN_WIDTH" ]; then
+            ARGS+=("--min-width" "$INPUT_MIN_WIDTH")
+          fi
+
+          if [ -n "$INPUT_MIN_HEIGHT" ]; then
+            ARGS+=("--min-height" "$INPUT_MIN_HEIGHT")
+          fi
+
+          if [ -n "$INPUT_APP_VERSION" ]; then
+            ARGS+=("--app-version" "$INPUT_APP_VERSION")
+          fi
+
+          if [ "$INPUT_FULLSCREEN" = "true" ]; then
+            ARGS+=("--fullscreen")
+          fi
+
+          if [ "$INPUT_HIDE_TITLE_BAR" = "true" ]; then
+            ARGS+=("--hide-title-bar")
+          fi
+
+          if [ "$INPUT_NEW_WINDOW" = "true" ]; then
+            ARGS+=("--new-window")
+          fi
+
+          if [ "$INPUT_MULTI_ARCH" = "true" ]; then
+            ARGS+=("--multi-arch")
+          fi
+
+          if [ -n "$INPUT_TARGETS" ] && [ "$RUNNER_OS" = "Linux" ]; then
+            ARGS+=("--targets" "$INPUT_TARGETS")
+          fi
+
+          printf 'Running: node dist/cli.js'
+          printf ' %q' "${ARGS[@]}"
+          printf '\n'
+
+          node dist/cli.js "${ARGS[@]}"
+
+      - name: Build App (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 25
         shell: pwsh
         env:
-          APP_URL: ${{ inputs.url }}
-          APP_NAME: ${{ inputs.name }}
-          APP_WIDTH: ${{ inputs.width }}
-          APP_HEIGHT: ${{ inputs.height }}
-          APP_VERSION: ${{ inputs.app_version }}
-
+          INPUT_URL: ${{ inputs.url }}
+          INPUT_NAME: ${{ inputs.name }}
+          INPUT_ICON: ${{ inputs.icon }}
+          INPUT_WIDTH: ${{ inputs.width }}
+          INPUT_HEIGHT: ${{ inputs.height }}
+          INPUT_MIN_WIDTH: ${{ inputs.min_width }}
+          INPUT_MIN_HEIGHT: ${{ inputs.min_height }}
+          INPUT_APP_VERSION: ${{ inputs.app_version }}
+          INPUT_FULLSCREEN: ${{ inputs.fullscreen }}
+          INPUT_HIDE_TITLE_BAR: ${{ inputs.hide_title_bar }}
+          INPUT_NEW_WINDOW: ${{ inputs.new_window }}
+          INPUT_MULTI_ARCH: ${{ inputs.multi_arch }}
         run: |
           $buildArgs = @(
-            $env:APP_URL,
-            "--name", $env:APP_NAME,
-            "--width", $env:APP_WIDTH,
-            "--height", $env:APP_HEIGHT,
-            "--app-version", $env:APP_VERSION,
-            "--keep-binary"
+            $env:INPUT_URL,
+            "--name", $env:INPUT_NAME
           )
 
-          Write-Host "Building AymanSoft..."
+          if ($env:INPUT_ICON) {
+            $buildArgs += @("--icon", $env:INPUT_ICON)
+          }
 
+          if ($env:INPUT_WIDTH) {
+            $buildArgs += @("--width", $env:INPUT_WIDTH)
+          }
+
+          if ($env:INPUT_HEIGHT) {
+            $buildArgs += @("--height", $env:INPUT_HEIGHT)
+          }
+
+          if ($env:INPUT_MIN_WIDTH) {
+            $buildArgs += @("--min-width", $env:INPUT_MIN_WIDTH)
+          }
+
+          if ($env:INPUT_MIN_HEIGHT) {
+            $buildArgs += @("--min-height", $env:INPUT_MIN_HEIGHT)
+          }
+
+          if ($env:INPUT_APP_VERSION) {
+            $buildArgs += @("--app-version", $env:INPUT_APP_VERSION)
+          }
+
+          if ($env:INPUT_FULLSCREEN -eq "true") {
+            $buildArgs += "--fullscreen"
+          }
+
+          if ($env:INPUT_HIDE_TITLE_BAR -eq "true") {
+            $buildArgs += "--hide-title-bar"
+          }
+
+          if ($env:INPUT_NEW_WINDOW -eq "true") {
+            $buildArgs += "--new-window"
+          }
+
+          Write-Host "Running Pake CLI..."
           node dist/cli.js @buildArgs
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Build failed!"
+            throw "Pake CLI build failed with exit code $LASTEXITCODE"
           }
 
-          Write-Host "Build completed successfully."
+          git checkout -- src-tauri/Cargo.lock
 
-      - name: Upload AymanSoft EXE
+      - name: Upload DMG (macOS)
+        if: runner.os == 'macOS'
         uses: actions/upload-artifact@v6
         with:
-          name: AYMANSOFT-EXE
-          path: AYMANSOFT.exe
+          name: ${{ inputs.name }}-macOS
+          path: "*.dmg"
+          retention-days: 3
           if-no-files-found: error
-          retention-days: 7
 
-      - name: Upload AymanSoft MSI
+      - name: Upload DEB (Linux)
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v6
         with:
-          name: AYMANSOFT-INSTALLER
+          name: ${{ inputs.name }}-Linux-deb
+          path: "*.deb"
+          retention-days: 3
+          if-no-files-found: ignore
+
+      - name: Upload AppImage (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ inputs.name }}-Linux-AppImage
+          path: "*.AppImage"
+          retention-days: 3
+          if-no-files-found: ignore
+
+      - name: Upload RPM (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ inputs.name }}-Linux-rpm
+          path: "*.rpm"
+          retention-days: 3
+          if-no-files-found: ignore
+
+      - name: Upload ZST (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ inputs.name }}-Linux-zst
+          path: "*.pkg.tar.zst"
+          retention-days: 3
+          if-no-files-found: ignore
+
+      - name: Upload MSI (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ inputs.name }}-Windows
           path: "*.msi"
+          retention-days: 3
           if-no-files-found: error
-          retention-days: 7
+          
